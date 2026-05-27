@@ -17,6 +17,13 @@ coverage.*
 *.coverprofile
 profile.cov
 
+# Build output binaries
+/bin/
+dist/
+build/
+cli-todo/todo
+**/todo
+
 # Dependency directories (remove the comment below to include it)
 # vendor/
 
