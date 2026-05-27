@@ -3,10 +3,12 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 type Note struct {
@@ -75,6 +77,42 @@ func (s *Store) Delete(id int) bool {
 		delete(s.notes, id)
 	}
 	return ok
+}
+
+// --- middleware ---
+
+type responseWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (rw *responseWriter) WriteHeader(status int) {
+	rw.status = status
+	rw.ResponseWriter.WriteHeader(status)
+}
+
+func logger(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		rw := &responseWriter{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(rw, r)
+		log.Printf("%s %s → %d (%s)",
+			r.Method, r.URL.Path, rw.status, time.Since(start))
+	})
+}
+
+func jsonHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		next.ServeHTTP(w, r)
+	})
+}
+
+func chain(h http.Handler, middleware ...func(http.Handler) http.Handler) http.Handler {
+	for i := len(middleware) - 1; i >= 0; i-- {
+		h = middleware[i](h)
+	}
+	return h
 }
 
 // --- helpers ---
@@ -180,6 +218,8 @@ func main() {
 	mux.HandleFunc("PUT /notes/{id}", store.updateNote)
 	mux.HandleFunc("DELETE /notes/{id}", store.deleteNote)
 
+	handler := chain(mux, logger, jsonHeaders)
+
 	fmt.Println("Server running on http://localhost:8080")
-	http.ListenAndServe(":8080", mux)
+	log.Fatal(http.ListenAndServe(":8080", handler))
 }
