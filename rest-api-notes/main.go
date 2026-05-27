@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -47,6 +48,39 @@ func (s *Store) GetAll() []Note {
 		notes = append(notes, note)
 	}
 	return notes
+}
+
+func (s *Store) Search(query string, sort string, limit int) []Note {	
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	query = strings.ToLower(query)
+	results := []Note{}
+	for _, note := range s.notes {
+		if strings.Contains(strings.ToLower(note.Title), query) ||
+			strings.Contains(strings.ToLower(note.Body), query) {
+			results = append(results, note)
+		}
+	}
+
+	switch sort {
+		case "asc":
+			slices.SortFunc(results, func(a, b Note) int {
+				return a.ID - b.ID
+			})
+		case "desc":
+			slices.SortFunc(results, func(a, b Note) int {
+				return b.ID - a.ID
+			})
+	}
+
+	if len(results) > limit {
+		results = results[:limit]
+	}
+
+	if len(results) > limit {
+		results = results[:limit]
+	}
+	return results
 }
 
 func (s *Store) Get(id int) (Note, bool) {
@@ -117,6 +151,10 @@ func chain(h http.Handler, middleware ...func(http.Handler) http.Handler) http.H
 
 // --- helpers ---
 
+func sortNotes(notes []Note, ) {
+	
+}
+
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
@@ -136,17 +174,16 @@ func idFromPath(r *http.Request) (int, error) {
 
 func (s *Store) listNotes(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query().Get("q")
-	if query != "" {
-		query = strings.ToLower(query)
-		notes := s.GetAll()
-		filtered := make([]Note, 0)
-		for _, note := range notes {
-			if strings.Contains(strings.ToLower(note.Title), query) ||
-				strings.Contains(strings.ToLower(note.Body), query) {
-				filtered = append(filtered, note)
-			}
+	sort := r.URL.Query().Get("sort")
+	limitStr := r.URL.Query().Get("limit")
+	limit := 10
+	if limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil {
+			limit = l
 		}
-		writeJSON(w, http.StatusOK, filtered)
+	}
+	if query != "" {
+		writeJSON(w, http.StatusOK, s.Search(query, sort, limit))
 		return
 	}
 	writeJSON(w, http.StatusOK, s.GetAll())
@@ -226,7 +263,7 @@ func main() {
 	store := NewStore()
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("GET /notes?q={q}", store.listNotes)
+	mux.HandleFunc("GET /notes", store.listNotes)
 	mux.HandleFunc("POST /notes", store.createNote)
 	mux.HandleFunc("GET /notes/{id}", store.getNote)
 	mux.HandleFunc("PUT /notes/{id}", store.updateNote)
